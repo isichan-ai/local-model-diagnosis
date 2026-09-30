@@ -54,8 +54,25 @@ def load(label: str) -> list:
         line = line.strip()
         if line:
             out.append(json.loads(line))
+    検分(out, label)
     return out
 
+
+def 検分(rows: list, label: str) -> None:
+    """空の答えがいくつあったかを知らせる（止めない）。
+
+    **
+    採点側は元からそうなっており（ok = bool(t.strip()) and ...）、分母も減らない。
+    2026-09-17 に入れた「空があったら止める」は、この規則と衝突するのでやめた。
+
+    ただし error の付いた行は採点から外れる（分母が減る）。全問が空やエラーなら
+    結果が明らかにおかしくなるので、下の行で気づけるようにしておく。
+    """
+    empty = [r for r in rows if not (r.get("response") or "").strip()]
+    err = sum(1 for r in rows if r.get("error"))
+    if empty or err:
+        print(f"  {label}: {len(rows)}問のうち 空 {len(empty)}問（×に数える）"
+              f" / 通信の失敗 {err}問（採点から外れる）", flush=True)
 
 def shortlist_ids() -> set:
     """短縮版167問の id。**全モデルをこの167問に揃える**。

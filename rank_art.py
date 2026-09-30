@@ -164,8 +164,18 @@ def table() -> dict:
     return _table
 
 
-def tier(v: dict, total_rank: str | None = None) -> int:
+def tier(v: dict, total_rank: str | None = None, d: dict | None = None) -> int:
+    """実作業の段位。
+
+    2026-09-18: 二つ名の位は分野方式（title_hit）で決まるのに、ここだけ古い
+    百分率の閾値（tier5）を使っていて、code=50.0 で「新人」と「見習い」に割れた。
+    d があれば二つ名と同じ決め方に揃える。d の無い呼び出しは今までどおり。
+    """
     import make_report as M
+    if d is not None:
+        hit = M.title_hit("code", d)
+        if hit is not None:
+            return min(hit, len(RANKS) - 1)
     x = v.get("code")
     if x is not None:
         return M.tier5(x)
@@ -182,7 +192,7 @@ def art_key(v: dict, total_rank: str | None = None, d: dict | None = None):
     ent = TYPE_TO_JOB.get(M.type_key(v, d))
     if not ent:
         return None
-    return RANKS[tier(v, total_rank)], ent[1]
+    return RANKS[tier(v, total_rank, d)], ent[1]
 
 
 def art_path(v: dict, total_rank: str | None = None, d: dict | None = None):

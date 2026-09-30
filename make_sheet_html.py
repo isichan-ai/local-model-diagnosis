@@ -47,7 +47,7 @@ def fs(pt: float) -> str:
 
 
 # サイトの版と揃える
-SHEET_VER = "Ver 01.04"   # 2026-09-15 分野方式（達成した分野の数で階位を決める）
+SHEET_VER = "Ver 01.05"   # 2026-09-30 審判方式・4大枠・文章プロンプト（旧 01.04＝2026-09-15 分野方式）
 
 
 def measured_at(label: str) -> str:
@@ -371,7 +371,7 @@ def sheet(label: str) -> str:
     keys = P.PERSONA + P.PERF
     GC = M.group_tints()                      # 2026-09-11: 行全体を十角形と同じ色の薄い版で塗る
     kpos = {k: i for i, (k, *_r) in enumerate(M.AXES)}
-    cols = (0.28, 0.97, 2.00, 0.45, 0.36)   #
+    cols = (0.28, 0.91, 2.06, 0.45, 0.36)   # 境目を左へ（0.97/2.00→0.91/2.06）
     tr = ['<colgroup>' + "".join(f'<col style="width:{px(w)}">' for w in cols) + "</colgroup>",
           "<thead><tr>" + "".join(
               f'<th style="height:{px(0.18)}">{h}</th>'
@@ -411,7 +411,6 @@ def sheet(label: str) -> str:
             mean = "".join(
                 ("" if i == 0 else "／") + (f'<b>{E(t)}</b>' if i == hit else E(t))
                 for i, t in enumerate(M.TITLES[k]))
-        # 2026-09-18 本人指示: コーディング・日本語の質・画像認識は
         # 実測の内訳ではなく固定の副題を出す
         if k in ("code", "vision", "ja"):
             dsc = AXD[k][1]

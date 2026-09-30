@@ -6,7 +6,7 @@
 
 やること:
   ① つながるか確かめて、測るモデルを決める
-  ② 7つの測定を順に回す（途中で止めても、済んだところからやり直せる）
+  ② 審判を準備して事前試験 → 10軸の測定を順に回す（途中で止めても、済んだところからやり直せる）
   ③ 診断書 <出力先>/診断書_<label>.html を書き、十文字を表示する
 
 答えの本文はこのPCから出ない。外部へ送るものは何もない。
@@ -144,26 +144,28 @@ def preflight(host: str, port: int, model: str, need: int = 8000) -> None:
         raise SystemExit(2)
 
 
-# ── ② 7つの測定 ────────────────────────────────────────────────
-# (出力ファイル, スクリプト, 追加の引数, 表示名, おおよその時間)
+# ── ② 10軸の測定（2026-09-27 改訂: 公開中の診断書と同じ分野方式に揃え、無検閲度・正直さ・率直さを審判方式に）
+# (出来上がるファイル, スクリプト, 追加の引数, 表示名, おおよその時間, 記録係を通すか)
+# 記録係（answer_logger.py）は、答えの「終わった理由」と長さを残す中継。打ち切り→自制心の補正に使う。
+# 無検閲度・正直さ・率直さは自分で記録する。コーディングは補正の対象外なので通さない。
 STEPS = [
-    ("dna",              "dna_short_run.py", [],              "無検閲度・率直さ", "5〜20分"),
-    ("l2_{L}.json",      "cap_l2.py",        ["--n", "20"],   "到達率・正答率",   "5〜30分"),
-    ("cap_core_{L}.json","cap_core.py",      [],              "自制心",           "3〜15分"),
-    ("l3_{L}.json",      "cap_l3.py",        [],              "正直さ・読解力",   "5〜60分"),
-    ("ja_{L}.json",      "cap_ja.py",        [],              "日本語の質",       "3〜15分"),
-    # Ver 01.03: 実作業・画像認識は5段の梯子（各10問・8/10 で次の段へ）。段位＝続けて通った最上段
-    ("code_ladder_{L}.json",   "cap_code.py",          ["--level", "all"], "実作業（L1〜L5）",   "15〜40分"),
-    ("vision_ladder_{L}.json", "cap_vision_ladder.py", [],                 "画像認識（V1〜V5）", "3〜10分"),
-    ("speed_{L}.json",   "speed.py",         [],              "速度",             "1分"),
+    ("open_v0104_{L}.json",           "cap_open_v0104.py",      [],                  "無検閲度",           "5〜20分", False),
+    ("persona_direct_v0104_{L}.json", "cap_persona_v0104.py",   [],                  "正直さ・率直さ",     "5〜20分", False),
+    ("persona_rule_{L}.json",         "cap_persona_domains.py", ["--axis", "rule"],  "正答率",             "3〜15分", True),
+    ("reach_domains_{L}.json",        "cap_reach_domains.py",   [],                  "到達率",             "5〜30分", True),
+    ("read_domains_{L}.json",         "cap_read_domains.py",    [],                  "読解力",             "5〜60分", True),
+    ("calm_ladder_{L}.json",          "cap_calm_ladder.py",     [],                  "自制心",             "5〜20分", True),
+    ("ja_{L}.json",                   "cap_ja.py",              [],                  "文章・プロンプト",   "3〜15分", True),
+    ("code_domains_{L}.json",         "cap_code.py",            ["--domain", "all"], "コーディング",       "15〜40分", False),
+    ("vision_ladder_{L}.json",        "cap_vision_ladder.py",   [],                  "画像認識",           "3〜10分", True),
+    ("speed_{L}.json",                "speed.py",               [],                  "速度",               "1分",     False),
 ]
+LOGGER_PORT = int(os.environ.get("LLMBENCH_LOGGER_PORT", "18700"))   # 2026-09-28: 2本同時に回す時は番号をずらす
 
 
 def done(out: str, label: str) -> bool:
     """済みかどうか。途中で止めた結果（*_partial だけで本体が無い）は済みと見なさない。
     2026-09-10: 途中で止めた l3 を「済み」と誤認して正直さ・読解力が空のまま診断書が出た実害"""
-    if out == "dna":
-        return os.path.exists(os.path.join(RES, f"dna_{label}.json"))
     p = os.path.join(RES, out.format(L=label))
     if not os.path.exists(p):
         return False
@@ -177,11 +179,31 @@ def done(out: str, label: str) -> bool:
     return True
 
 
-def run_step(script: str, extra: list, host: str, port: int, model: str, label: str) -> int:
+def run_step(script: str, extra: list, host: str, port: int, model: str, label: str,
+             log_as: str | None = None) -> int:
+    """1つの測定を回す。log_as を渡すと記録係を間に挟み、答えの終わった理由と長さを残す。"""
+    lg = None
+    if log_as:
+        lg = subprocess.Popen([sys.executable, "-X", "utf8", os.path.join(HERE, "answer_logger.py"),
+                               "--listen", str(LOGGER_PORT), "--target", str(port), "--host", host,
+                               "--log", os.path.join(RES, f"answers_{label}_{log_as}.jsonl")],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        for _ in range(30):
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{LOGGER_PORT}/v1/models", timeout=5)
+                break
+            except Exception:
+                time.sleep(1)
+        host, port = "127.0.0.1", LOGGER_PORT
     cmd = [sys.executable, "-X", "utf8", os.path.join(HERE, script),
            "--port", str(port), "--model", model, "--label", label] + extra
     env = dict(os.environ, DIAG_HOST=host)   # 各測定はこれを見て宛先を決める
-    return subprocess.call(cmd, cwd=HERE, env=env)
+    try:
+        return subprocess.call(cmd, cwd=HERE, env=env)
+    finally:
+        if lg:
+            lg.terminate()
+            lg.wait(timeout=30)
 
 
 def score_dna(label: str) -> None:
@@ -274,6 +296,7 @@ def main() -> None:
     ap.add_argument("--engine", default=None, help="診断書の右上に出す一行（例 llama.cpp :8080 / Q4_K_M）")
     ap.add_argument("--out", default=os.path.join(HERE, "診断書"), help="診断書の出力先")
     ap.add_argument("--redo", action="store_true", help="済んだ測定もやり直す")
+    ap.add_argument("--only", nargs="+", default=[], help="試し用: この測定だけ回す（例 open_v0104 persona_rule）")
     a = ap.parse_args()
 
     os.makedirs(RES, exist_ok=True)
@@ -289,20 +312,38 @@ def main() -> None:
               ensure_ascii=False, indent=1)
 
     t0 = time.time()
-    for k, (out, script, extra, title, span) in enumerate(STEPS, start=1):
-        if not a.redo and done(out, label):
-            say(f"[{k}/{len(STEPS)}] {title} … 済んでいるので飛ばす")
-            continue
-        say(f"[{k}/{len(STEPS)}] {title} …（目安 {span}）")
-        t1 = time.time()
-        rc = run_step(script, extra, a.host, a.port, model, label)
-        if rc != 0:
-            say(f"× {script} が失敗しました（終了コード {rc}）。ここで止めます。")
-            say("  直したあとに同じコマンドを流すと、済んだところは飛ばして続きから測ります。")
-            raise SystemExit(rc)
-        if out == "dna":
-            score_dna(label)
-        say(f"   {time.time() - t1:.0f} 秒")
+    # 審判（CPUで2本）を立て、答えの分かっている見本で試してから測る。外れたら点を出さずに止める
+    import judges as J
+    say("審判を準備しています（CPU・初回は1分ほど）…")
+    J.start()
+    try:
+        bad = J.pretest()
+        if bad:
+            say("× 審判の事前試験に合格しませんでした。点を出さずに止めます。")
+            for b in bad:
+                say("  " + b)
+            raise SystemExit(4)
+        say("  審判の事前試験に合格しました。")
+        for k, (out, script, extra, title, span, logged) in enumerate(STEPS, start=1):
+            short = out.split("_{L}")[0]
+            if a.only and short not in a.only:
+                continue
+            if not a.redo and done(out, label):
+                say(f"[{k}/{len(STEPS)}] {title} … 済んでいるので飛ばす")
+                continue
+            say(f"[{k}/{len(STEPS)}] {title} …（目安 {span}）")
+            t1 = time.time()
+            short = out.split("_{L}")[0]
+            rc = run_step(script, extra, a.host, a.port, model, label, log_as=short if logged else None)
+            if rc != 0:
+                say(f"× {script} が失敗しました（終了コード {rc}）。ここで止めます。")
+                say("  直したあとに同じコマンドを流すと、済んだところは飛ばして続きから測ります。")
+                raise SystemExit(rc)
+            say(f"   {time.time() - t1:.0f} 秒")
+    finally:
+        J.stop()
+    import correct_v0104
+    correct_v0104.main(label)       # 打ち切り→自制心・長すぎ→率直さ（基準表がある時だけ）
 
     import make_report as M
     d = M.load(label)

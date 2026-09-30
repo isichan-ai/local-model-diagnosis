@@ -59,6 +59,14 @@ def chat(port: int, messages: list, max_tokens: int, tools: list | None = None) 
         body["tools"] = tools
     t0 = time.time()
     r = requests.post(f"http://{_HOST}:{port}/v1/chat/completions", json=body, timeout=1800)
+    if r.status_code == 500 and "tool call" in r.text.lower():
+        # 2026-09-24: 道具呼び出しを延々と繰り返して上限で切れ、壊れた JSON になるモデルがある
+        # （MiMo-V2.6-9B が実例。同じ3つの呼び出しを無限に並べて 500 になる）。
+        # サーバーが解析できない出力は「その段に失敗した」として扱い、測定は続ける。
+        # 正しく答えるモデルはここを通らないので、既存の点数には影響しない。
+        USAGE["requests"] += 1
+        USAGE["sec"] += time.time() - t0
+        return {"text": "", "tool_calls": [], "finish": "invalid_tool_call"}
     r.raise_for_status()
     j = r.json()
     USAGE["requests"] += 1
@@ -275,10 +283,12 @@ def run_s4(port: int, r: random.Random) -> list:
                 else:
                     msgs.append({"role": "tool", "tool_call_id": tc.get("id") or "c0",
                                  "content": f'{{"key": "{key}", "value": {r.randrange(100, 999)}}}'})
-        ok = n_fail < calls <= n_fail + 2      # 失敗の分は粘り、取れたら余計に叩かない
-        out.append({"id": f"S4-{key}", "ok": ok,
-                    "why": f"呼んだ回数 {calls}（{n_fail}回失敗・{n_fail + 1}〜{n_fail + 2}回が合格）",
-                    "answer": ""})
+        broke = o["finish"] == "invalid_tool_call"
+        ok = (not broke) and n_fail < calls <= n_fail + 2   # 失敗の分は粘り、取れたら余計に叩かない
+        why = (f"呼んだ回数 {calls}（{n_fail}回失敗・{n_fail + 1}〜{n_fail + 2}回が合格）"
+               if not broke else
+               f"道具呼び出しが壊れた（同じ呼び出しを繰り返して上限で切れた）・呼んだ回数 {calls}")
+        out.append({"id": f"S4-{key}", "ok": ok, "why": why, "answer": ""})
     return out
 
 
