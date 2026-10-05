@@ -48,6 +48,7 @@ def generate(port: int, model: str, q: dict) -> dict:
             "max_tokens": _E.cap_tok(MAXTOK), "temperature": 0.2, "stream": True,
             "chat_template_kwargs": _E.tmpl_kwargs()}
     text, n, fin, early = "", 0, None, None
+    reasoning = ""   # 2026-10-05: 思考オンの寄与の地図の材料に、思考の中身も残す（採点には使わない）
     try:
         resp = urllib.request.urlopen(urllib.request.Request(
             f"http://{_HOST}:{port}/v1/chat/completions", json.dumps(body).encode(),
@@ -60,6 +61,7 @@ def generate(port: int, model: str, q: dict) -> dict:
             if not js.get("choices"):
                 continue
             ch = js["choices"][0]
+            reasoning += (ch.get("delta") or {}).get("reasoning_content") or ""
             piece = (ch.get("delta") or {}).get("content") or ""
             if piece:
                 text += piece
@@ -72,9 +74,11 @@ def generate(port: int, model: str, q: dict) -> dict:
                     resp.close()
                     fin = "early_stop"
                     break
-        return {"response": text, "tokens": n, "finish_reason": fin, "error": None}
+        return {"response": text, "tokens": n, "finish_reason": fin, "error": None,
+                **({"reasoning": reasoning} if reasoning else {})}
     except Exception as e:
-        return {"response": text, "tokens": n, "finish_reason": fin, "error": repr(e)[:200]}
+        return {"response": text, "tokens": n, "finish_reason": fin, "error": repr(e)[:200],
+                **({"reasoning": reasoning} if reasoning else {})}
 
 
 def score(rows: list) -> dict:

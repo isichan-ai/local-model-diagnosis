@@ -389,7 +389,8 @@ def v4_items(r: random.Random) -> list:
             def hit(w):
                 return any(a in out for a in [w] + list(alias.get(w, [])))
             got = [w for w in must if hit(w)]
-            bad = [w for w in decoys if w in out]
+            # 囮の直後に漢字・カタカナが続く時は別の単語の一部（窓→窓枠・人→人名・本→日本語）として数えない（2026-10-03）
+            bad = [w for w in decoys if any(not re.match(r"[一-鿿゠-ヿー]", out[m.end():m.end() + 1]) for m in re.finditer(re.escape(w), out))]
             o2 = z2h(out)
             miss_n = [f"{w}={c}" for w, c in counts.items() if not (str(c) in o2 or KANJI.get(c, "") and KANJI[c] in out)]
             ok = len(got) == len(must) and not bad and not miss_n

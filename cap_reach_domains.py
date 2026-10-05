@@ -84,7 +84,8 @@ def chat(port: int, messages: list, max_tokens: int = 700) -> dict:
     USAGE["completion_tokens"] += int((j.get("usage") or {}).get("completion_tokens") or 0)
     USAGE["sec"] += time.time() - t0
     m = j["choices"][0]["message"]
-    return {"text": (m.get("content") or "").strip(), "tool_calls": m.get("tool_calls") or []}
+    return {"text": (m.get("content") or "").strip(), "tool_calls": m.get("tool_calls") or [],
+            "reasoning": m.get("reasoning_content") or ""}   # 2026-10-05: 寄与の地図の材料に思考の中身も（送り返さない）
 
 
 def safe_calc(expr: str):
@@ -436,6 +437,8 @@ def tally(log: list, bad_set: tuple) -> tuple:
 def run_one(port: int, t: dict) -> dict:
     msgs = [{"role": "user", "content": PROMPT[t["kind"]].format(oid=t["oid"])}]
     used, log = [], []
+    # 2026-10-05: 到達率の寄与の地図の材料＝やり取りの全文を記録だけに残す（モデルへ送る msgs は今までどおり）
+    transcript = [dict(msgs[0])]
 
     def done(reached, got):
         dup, bad = tally(log, bad_tools(t))
@@ -444,12 +447,14 @@ def run_one(port: int, t: dict) -> dict:
                 "steps": len(used), "tools": used, "dup": dup, "bad": bad,
                 "incl": t["incl"],
                 # 2026-09-15: 重複は**0回**が合格（1回まで許すと誰も落ちなかった）
-                "ok": bool(reached) and dup == 0 and bad == 0}
+                "ok": bool(reached) and dup == 0 and bad == 0, "transcript": transcript}
 
     for _ in range(MAX_ROUNDS):
         o = chat(port, msgs)
         tcs = o["tool_calls"]
         msgs.append({"role": "assistant", "content": o["text"], **({"tool_calls": tcs} if tcs else {})})
+        transcript.append({"role": "assistant", "content": o["text"], "reasoning": o["reasoning"],
+                           **({"tool_calls": tcs} if tcs else {})})
         if not tcs:
             got = last_int(o["text"])
             return done(got is not None, got)
@@ -464,6 +469,7 @@ def run_one(port: int, t: dict) -> dict:
             log.append((fn, json.dumps(args, ensure_ascii=False, sort_keys=True),
                         out.startswith("error: サーバーが混雑")))
             msgs.append({"role": "tool", "tool_call_id": tc.get("id") or "c0", "content": out})
+            transcript.append({"role": "tool", "name": fn, "content": out})
     return done(False, None)
 
 
@@ -491,7 +497,7 @@ def run(port: int, label: str) -> dict:
                                   + (f" → {ng}" if ng else ""),
                            "tools": o["tools"], "dup": o["dup"], "bad": o["bad"],
                            "steps": o["steps"], "reached": o["reached"],
-                           "見積条件": t["kubun"]})
+                           "見積条件": t["kubun"], "transcript": o.get("transcript")})
             print(f"  到達率 {name:8s}#{i + 1} {'○' if o['ok'] else '×'} "
                   f"答え {o['got']} 呼び出し {o['steps']} 重複 {o['dup']} 取り違え {o['bad']}",
                   flush=True)

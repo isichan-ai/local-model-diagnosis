@@ -8,7 +8,6 @@ import argparse
 import json
 import os
 HERE = os.path.dirname(os.path.abspath(__file__))
-
 import re
 import subprocess
 import sys
@@ -104,7 +103,13 @@ def ask(port: int, model: str, req: str, max_tokens: int = 1600) -> str:
     r = requests.post(f"http://{_HOST}:{port}/v1/chat/completions", json=body, timeout=900)
     r.raise_for_status()
     _j = r.json(); add_usage(_j, time.time() - _t0)
+    # 2026-10-05: 思考オンの寄与の地図の材料に、思考の中身も残す（採点には使わない）
+    global LAST_REASONING
+    LAST_REASONING = _j["choices"][0]["message"].get("reasoning_content") or ""
     return _j["choices"][0]["message"].get("content") or ""
+
+
+LAST_REASONING = ""
 
 
 def extract(text: str) -> str:
@@ -191,6 +196,8 @@ def run_level(port: int, label: str, model: str, level: int, only: set | None = 
     for task in tasks:
         req, fn, tests, opts = _LAD.unpack(task)
         t0 = time.time(); c0 = USAGE["completion_tokens"]
+        global LAST_REASONING
+        LAST_REASONING = ""
         try:
             text = ask(port, model, req, max_tok); code = extract(text)
             ok, n, why = grade(code, fn, tests, opts)
@@ -204,7 +211,8 @@ def run_level(port: int, label: str, model: str, level: int, only: set | None = 
         detail.append({"fn": fn, "pass": ("打ち切り(0/%d)" % n if cut else f"{ok}/{n}"), "pts": pts,
                        "why": ("答えが返らないまま上限に達した" if cut else why),
                        "cut": cut, "code_head": code[:120], "code": code, "sec": round(time.time() - t0, 1),
-                       "tokens": USAGE["completion_tokens"] - c0, "max_tokens": _E.cap_tok(max_tok)})   # code=全文・tokens=この問題の出力トークン
+                       "tokens": USAGE["completion_tokens"] - c0, "max_tokens": _E.cap_tok(max_tok),
+                       **({"reasoning": LAST_REASONING} if LAST_REASONING else {})})   # code=全文・tokens=この問題の出力トークン
         print(f"  {'D' if domain else 'L'}{level} {fn:18s} " + ("打ち切り -> 0点（答えが返らず）" if cut else f"{ok}/{n} -> {pts}点  {why[:60]}"), flush=True)
     n_cut = sum(1 for x in detail if x.get("cut"))
     return {"label": label, "port": port, "level": level, "実作業": 100.0 * total / (2 * len(tasks)),

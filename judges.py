@@ -100,6 +100,8 @@ SERVER = Q3G_GGUF = E2B_GGUF = None      # start() の時に locate() で決め�
 Q3G_PORT = int(os.environ.get("LLMBENCH_Q3G_PORT", "18690"))
 E2B_PORT = int(os.environ.get("LLMBENCH_E2B_PORT", "18694"))
 THREADS = str(int(os.environ.get("LLMBENCH_JUDGE_THREADS", "8")))
+# 既定は 0（CPU）のまま＝配布版と公開の診断書は変わらない。GPU 用の llama-server（ggml-cuda 入り）が要る
+JUDGE_NGL = str(int(os.environ.get("LLMBENCH_JUDGE_NGL", "0")))
 
 Q3G_TEMPLATE = open(os.path.join(DATA, "q3g_template.txt"), encoding="utf-8").read()
 
@@ -138,7 +140,7 @@ def _start(gguf: str, port: int):
         raise SystemExit(f"× 審判を動かす llama-server が見つかりません: {SERVER}")
     if not os.path.exists(gguf):
         raise SystemExit(f"× 審判のモデルが見つかりません: {gguf}")
-    p = subprocess.Popen([SERVER, "-m", gguf, "-ngl", "0", "-c", "16384", "--parallel", "1", "-t", THREADS,
+    p = subprocess.Popen([SERVER, "-m", gguf, "-ngl", JUDGE_NGL, "-c", "16384", "--parallel", "1", "-t", THREADS,
                           "--jinja", "--host", "127.0.0.1", "--port", str(port)],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     for _ in range(120):

@@ -110,6 +110,19 @@ def pick(host: str, port: int, want: str | None) -> str:
     return ids[0]
 
 
+def file_bytes(host: str, port: int, model: str):
+    """モデルファイルの大きさ（バイト）。llama.cpp は /v1/models の meta.size に入れて返す。
+    返さないサーバー（Ollama など）では None＝比較表の「ファイル」は「—」になる（Ver 01.06）"""
+    try:
+        with urllib.request.urlopen(f"http://{host}:{port}/v1/models", timeout=10) as r:
+            for m in json.load(r).get("data", []):
+                if m.get("id") == model and (m.get("meta") or {}).get("size"):
+                    return int(m["meta"]["size"])
+    except Exception:
+        pass
+    return None
+
+
 def preflight(host: str, port: int, model: str, need: int = 8000) -> None:
     """長い文章を受け取れるか先に確かめる。
 
@@ -277,10 +290,16 @@ def sheet(label: str, out_dir: str) -> str:
     sc = M.score(d["v"])
     k = rank_art.art_key(d["v"], sc.get("rank"), d)
     name, full, eng = M.names(label)
-    j = {"format": "lmd-sheet/1", "label": label, "name": full, "code": M.code(d["v"], d),
+    j = {"format": "lmd-sheet/2", "label": label, "name": full, "code": M.code(d["v"], d),
          "epithet": M.epithet(d), "desc": M.TYPENAME.get(M.type_key(d["v"], d), ("", ""))[1],
          "score": sc.get("scaled"), "rank": sc.get("rank"),
          "art": {"rank": k[0], "job": k[1]} if k else None, "html": S.sheet(label)}
+    # Ver 01.06: サイトの「詳細表示」で複数の診断書を1枚の比較表にするための数字（答えの本文は入らない）
+    try:
+        import make_compare_table as T
+        j["table"] = T.table_data(label)
+    except Exception as e:
+        say(f"  ⚠ 比較表の材料を作れませんでした（診断書そのものは出ます）: {e}")
     io.open(os.path.join(out_dir, f"診断書_{label}.json"), "w", encoding="utf-8").write(
         json.dumps(j, ensure_ascii=False))
     return p
@@ -307,7 +326,8 @@ def main() -> None:
     preflight(a.host, a.port, model)
     say("  問題ありません。")
     json.dump({"name": a.name or model, "full": a.name or model,
-               "engine": a.engine or f"{a.host}:{a.port}"},
+               "engine": a.engine or f"{a.host}:{a.port}",
+               "file_bytes": file_bytes(a.host, a.port, model)},
               io.open(os.path.join(RES, f"meta_{label}.json"), "w", encoding="utf-8"),
               ensure_ascii=False, indent=1)
 
